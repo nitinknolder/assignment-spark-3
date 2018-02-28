@@ -5,11 +5,6 @@ import org.apache.spark.SparkConf
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
-//HomeTeam = Home Team
-//AwayTeam = Away Team
-//FTHG and HG = Full Time Home Team Goals
-//FTAG and AG = Full Time Away Team Goals
-//FTR and Res = Full Time Result (H=Home Win, D=Draw, A=Away Win)
 object SoccerMatches {
   def main (args: Array[String]): Unit = {
     Logger.getLogger ("org").setLevel (Level.OFF)
@@ -43,17 +38,16 @@ object SoccerMatches {
 
     val totalNumberOfMatches = playedAsHome.join (playedAsAway, playedAsHome ("HomeTeam") === playedAsAway ("AwayTeam"))
     totalNumberOfMatches.createOrReplaceTempView ("numOfMatches")
-    sparkSession.sql ("SELECT HomeTeam As matches,(HomeCounts + AwayCounts) As Total From numOfMatches").createOrReplaceTempView ("AllMatches")
+    val matches1 = sparkSession.sql ("SELECT HomeTeam As matches,(HomeCounts + AwayCounts) As Total From numOfMatches")
 
     val totalNumberOfWins = noOfHomeWins.join (noOfAwayWins, noOfHomeWins ("HomeTeam") === noOfAwayWins ("AwayTeam"))
     totalNumberOfWins.createOrReplaceTempView ("numOfWins")
-    sparkSession.sql ("SELECT HomeTeam As wining,(homeWins + awayWins) As Wins From numOfWins").createOrReplaceTempView ("AllWins")
+    val wins1 = sparkSession.sql ("SELECT HomeTeam As wining,(homeWins + awayWins) As Wins From numOfWins")
+
+    matches1.join (wins1, matches1 ("matches") === wins1 ("wining")).createOrReplaceTempView ("result")
 
     val result = sparkSession.sql (
-      "SELECT matches As Team,(Wins/numOfMatches) * 100)" +
-        "As highestPercentage FROM " +
-        "AllWins" +
-        "ORDER BY highestPercentage DESC LIMIT 10")
+      "SELECT matches AS Team,((Wins/Total) * 100) AS highestPercentage FROM result ORDER BY highestPercentage DESC LIMIT 10")
     result.show ()
 
     /** ************************************************************ DataSets *********************************************************/
@@ -72,15 +66,15 @@ only following fields. */
     convertToDataSet.select ($"HomeTeam").union (convertToDataSet.select ($"AwayTeam")).groupBy ($"HomeTeam").count ().show ()
 
     /* Ques 6:  top ten Teams With Highest Number Of Wins */
+
     val homeTeam = convertToDataSet.select ("HomeTeam", "FTR").where ("FTR = 'H'").groupBy ("HomeTeam").count ().withColumnRenamed ("count", "HomeWins")
     val awayTeam = convertToDataSet.select ("AwayTeam", "FTR").where ("FTR = 'A'").groupBy ("AwayTeam").count ().withColumnRenamed ("count", "AwayWins")
     val teams = homeTeam.join (awayTeam, homeTeam.col ("HomeTeam") === awayTeam.col ("AwayTeam"))
-    val add: (Int, Int) => Int = (HomeMatches: Int, TeamMatches: Int) => HomeMatches + TeamMatches
-    val total = udf (add)
+    val sum: (Int, Int) => Int = (HomeMatches: Int, TeamMatches: Int) => HomeMatches + TeamMatches
+    val total = udf (sum)
     val ten = 10
     teams.withColumn ("TotalWins", total (col ("HomeWins"), col ("AwayWins"))).select ("HomeTeam", "TotalWins")
       .withColumnRenamed ("HomeTeam", "Team").sort (desc ("TotalWins")).limit (ten).show ()
-
   }
 }
 
